@@ -1,0 +1,28 @@
+{
+  "name": "tsix",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "oxlint .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "test": "vitest run",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@tsix/cli": "workspace:*",
+    "@tsix/dsl": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "tsx": "^4.23.0",
+    "typescript": "6.0.3",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
