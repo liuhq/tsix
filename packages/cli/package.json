@@ -1,0 +1,23 @@
+{
+  "name": "@tsix/cli",
+  "version": "0.1.0",
+  "bin": {
+    "tsix": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@tsix/ir": "workspace:*",
+    "@tsix/nix": "workspace:*",
+    "tsx": "^4.23.0"
+  }
+}

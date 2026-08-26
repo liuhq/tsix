@@ -1,0 +1,21 @@
+{
+  "name": "@tsix/nix",
+  "version": "0.1.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@tsix/ir": "workspace:*"
+  },
+  "devDependencies": {
+    "@tsix/dsl": "workspace:*"
+  }
+}
