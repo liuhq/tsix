@@ -1,0 +1,2 @@
+# tsix
+Typescript ❤ Nix
