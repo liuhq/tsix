@@ -1,6 +1,6 @@
 {
   "name": "@tsix/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "bin": {
     "tsix": "./dist/bin.js"
   },
@@ -16,8 +16,9 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@tsix/ir": "workspace:*",
-    "@tsix/nix": "workspace:*",
+    "@tsix/bridge": "workspace:*",
+    "@tsix/core": "workspace:*",
+    "@tsix/store": "workspace:*",
     "tsx": "^4.23.0"
   }
 }

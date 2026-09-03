@@ -1,39 +1,12 @@
-import { execFile } from "node:child_process";
-import {
-  access,
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
-import type { FlakeDefinition } from "@tsix/ir";
-import { copyAssets, emitFlake } from "@tsix/nix";
+import { LockManager, NixBridge, targetKind } from "@tsix/bridge";
+import { type BuildTarget, type ConfigDefinition, type NixosSystemDefinition } from "@tsix/core";
+import { DerivationCompiler, NixDriver, type ResolvedOutput } from "@tsix/store";
 import { tsImport } from "tsx/esm/api";
 
-const execute = promisify(execFile);
-const manifestName = ".tsix-manifest.json";
-
-interface Manifest {
-  readonly version: 1;
-  readonly generatedAssets: readonly string[];
-}
-
-async function exists(path: string): Promise<boolean> {
-  return access(path).then(
-    () => true,
-    () => false,
-  );
-}
-
-export async function loadFlake(entry: string): Promise<FlakeDefinition> {
+export async function loadConfig(entry = "tsix.config.ts"): Promise<ConfigDefinition> {
   const entryFile = resolve(entry);
   const loaded = (await tsImport(pathToFileURL(entryFile).href, import.meta.url)) as {
     default?: unknown;
@@ -42,102 +15,179 @@ export async function loadFlake(entry: string): Promise<FlakeDefinition> {
   if (
     typeof value !== "object" ||
     value === null ||
-    !("__tsixFlake" in value) ||
-    value["__tsixFlake"] !== true
+    !("tsixConfig" in value) ||
+    value.tsixConfig !== true
   ) {
-    throw new TypeError(`${entry} must default-export the result of defineFlake()`);
+    throw new TypeError(`${entry} must default-export defineConfig()`);
   }
-  return value as FlakeDefinition;
+  return value as ConfigDefinition;
 }
 
-async function readManifest(directory: string): Promise<Manifest | undefined> {
-  try {
-    const parsed = JSON.parse(await readFile(join(directory, manifestName), "utf8")) as Manifest;
-    return parsed.version === 1 && Array.isArray(parsed.generatedAssets) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+export interface ListedTarget {
+  readonly path: string;
+  readonly kind: "native" | "nixpkgs" | "nixos" | "unknown";
+  readonly system?: string;
 }
 
-async function preserveUnmanaged(
-  oldDirectory: string,
-  stage: string,
-  manifest: Manifest,
-): Promise<void> {
-  const oldAssets = join(oldDirectory, "assets");
-  if (!(await exists(oldAssets))) return;
-  await mkdir(join(stage, "assets"), { recursive: true });
-  for (const name of await readdir(oldAssets)) {
-    if (!manifest.generatedAssets.includes(name))
-      await cp(join(oldAssets, name), join(stage, "assets", name), {
-        recursive: true,
-        errorOnExist: true,
-      });
-  }
-}
-
-export interface BuildOptions {
-  readonly outDirectory?: string;
-  readonly stdout?: boolean;
-  readonly projectRoot?: string;
-}
-
-export async function build(entry: string, options: BuildOptions = {}): Promise<string> {
-  const entryFile = resolve(entry);
-  const flake = await loadFlake(entryFile);
-  const output = resolve(options.outDirectory ?? "dist/tsix");
-  const result = await emitFlake(flake, {
-    entryFile,
-    projectRoot: resolve(options.projectRoot ?? process.cwd()),
-    ...(options.stdout ? {} : { preserveRoot: output }),
-  });
-  if (options.stdout) {
-    if (result.assets.length !== 0)
-      throw new Error("--stdout cannot be used when copied assets are required");
-    return result.nix;
-  }
-  const parent = dirname(output);
-  await mkdir(parent, { recursive: true });
-  const stage = await mkdtemp(join(parent, `.${basename(output)}-stage-`));
-  const backup = join(parent, `.${basename(output)}-previous-${process.pid}`);
-  try {
-    await writeFile(join(stage, "flake.nix"), result.nix);
-    await copyAssets(result.assets, stage);
-    await writeFile(
-      join(stage, manifestName),
-      JSON.stringify(
-        { version: 1, generatedAssets: result.assets.map((asset) => asset.name) },
-        null,
-        2,
-      ) + "\n",
-    );
-    if (await exists(output)) {
-      const manifest = await readManifest(output);
-      if (manifest === undefined)
-        throw new Error(`Refusing to replace ${output}: it is not managed by tsix`);
-      await preserveUnmanaged(output, stage, manifest);
-      await rename(output, backup);
+export function listTargets(config: ConfigDefinition): readonly ListedTarget[] {
+  const values: ListedTarget[] = [];
+  for (const [system, packages] of Object.entries(config.packages)) {
+    for (const [name, target] of Object.entries(packages)) {
+      values.push({ path: `packages.${system}.${name}`, kind: targetKind(target), system });
     }
-    await rename(stage, output);
-    await rm(backup, { recursive: true, force: true });
-  } catch (error) {
-    if (!(await exists(output)) && (await exists(backup))) await rename(backup, output);
-    await rm(stage, { recursive: true, force: true });
-    throw error;
   }
-  return output;
+  for (const [system, checks] of Object.entries(config.checks)) {
+    for (const [name, target] of Object.entries(checks)) {
+      values.push({ path: `checks.${system}.${name}`, kind: targetKind(target), system });
+    }
+  }
+  for (const [name, definition] of Object.entries(config.nixosConfigurations)) {
+    values.push({ path: `nixosConfigurations.${name}`, kind: "nixos", system: definition.system });
+  }
+  return values.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
-export async function check(entry: string, projectRoot = process.cwd()): Promise<void> {
-  const temporary = await mkdtemp(join(tmpdir(), "tsix-check-"));
-  try {
-    await build(entry, { outDirectory: join(temporary, "flake"), projectRoot });
-    await execute(
-      "nix",
-      ["flake", "check", `path:${join(temporary, "flake")}`, "--no-write-lock-file"],
-      { maxBuffer: 16 * 1024 * 1024 },
-    );
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
+type LocatedTarget =
+  | { readonly kind: "build"; readonly value: BuildTarget }
+  | { readonly kind: "nixos"; readonly value: NixosSystemDefinition };
+
+export function findTarget(config: ConfigDefinition, path: string): LocatedTarget {
+  const parts = path.split(".");
+  if (parts[0] === "nixosConfigurations" && parts.length >= 2) {
+    const value = config.nixosConfigurations[parts.slice(1).join(".")];
+    if (value !== undefined) return { kind: "nixos", value };
   }
+  if ((parts[0] === "packages" || parts[0] === "checks") && parts.length >= 3) {
+    const group = parts[0] === "packages" ? config.packages : config.checks;
+    const value = group[parts[1]!]?.[parts.slice(2).join(".")];
+    if (value !== undefined) return { kind: "build", value };
+  }
+  throw new Error(`Unknown target: ${path}`);
+}
+
+export interface FlakeCommandOptions {
+  readonly entry?: string;
+  readonly projectRoot?: string;
+  readonly driver?: NixDriver;
+}
+
+export async function lock(options: FlakeCommandOptions = {}): Promise<void> {
+  const context = await baseContext(options);
+  await context.driver.assertCompatible();
+  await context.locks.lock(context.config.inputs);
+}
+
+export async function update(
+  selected: readonly string[],
+  options: FlakeCommandOptions = {},
+): Promise<void> {
+  const context = await baseContext(options);
+  await context.driver.assertCompatible();
+  await context.locks.update(context.config.inputs, selected);
+}
+
+export async function show(options: FlakeCommandOptions = {}): Promise<{
+  readonly inputs: ConfigDefinition["inputs"];
+  readonly targets: readonly ListedTarget[];
+}> {
+  const { config } = await baseContext(options);
+  return { inputs: config.inputs, targets: listTargets(config) };
+}
+
+export async function build(
+  path: string,
+  buildOptions: { readonly outLink?: string } = {},
+  options: FlakeCommandOptions = {},
+): Promise<readonly string[]> {
+  return withRuntime(
+    options,
+    async ({ config, compiler, bridge, driver, entryFile, projectRoot }) => {
+      const target = findTarget(config, path);
+      const resolved = await resolveTarget(target, compiler, bridge, entryFile, projectRoot);
+      return driver.build(
+        `${resolved.drvPath}^${resolved.output}`,
+        buildOptions.outLink === undefined ? {} : { outLink: buildOptions.outLink },
+      );
+    },
+  );
+}
+
+export async function check(options: FlakeCommandOptions = {}): Promise<void> {
+  await withRuntime(
+    options,
+    async ({ config, compiler, bridge, driver, entryFile, projectRoot }) => {
+      for (const packages of Object.values(config.packages)) {
+        for (const target of Object.values(packages)) await compiler.compileTarget(target);
+      }
+      for (const definition of Object.values(config.nixosConfigurations)) {
+        await bridge.instantiateNixos(definition, compiler, { entryFile, projectRoot });
+      }
+      for (const checks of Object.values(config.checks)) {
+        for (const target of Object.values(checks)) {
+          const resolved = await compiler.compileTarget(target);
+          await driver.build(`${resolved.drvPath}^${resolved.output}`, { noLink: true });
+        }
+      }
+    },
+  );
+}
+
+async function baseContext(options: FlakeCommandOptions): Promise<{
+  readonly config: ConfigDefinition;
+  readonly driver: NixDriver;
+  readonly locks: LockManager;
+  readonly entryFile: string;
+  readonly projectRoot: string;
+}> {
+  const entryFile = resolve(options.entry ?? "tsix.config.ts");
+  await access(entryFile);
+  const projectRoot = resolve(options.projectRoot ?? process.cwd());
+  const driver = options.driver ?? new NixDriver();
+  return {
+    config: await loadConfig(entryFile),
+    driver,
+    locks: new LockManager(driver, projectRoot),
+    entryFile,
+    projectRoot,
+  };
+}
+
+async function withRuntime<T>(
+  options: FlakeCommandOptions,
+  operation: (runtime: {
+    readonly config: ConfigDefinition;
+    readonly compiler: DerivationCompiler;
+    readonly bridge: NixBridge;
+    readonly driver: NixDriver;
+    readonly entryFile: string;
+    readonly projectRoot: string;
+  }) => Promise<T>,
+): Promise<T> {
+  const context = await baseContext(options);
+  await context.driver.assertCompatible();
+  const lockFile = await context.locks.requireCurrent(context.config.inputs);
+  const capsule = await context.locks.createCapsule(context.config.inputs, lockFile);
+  try {
+    const bridge = new NixBridge(context.driver, capsule);
+    const compiler = new DerivationCompiler(context.driver, {
+      entryFile: context.entryFile,
+      projectRoot: context.projectRoot,
+      resolver: bridge,
+    });
+    return await operation({ ...context, compiler, bridge });
+  } finally {
+    await capsule.dispose();
+  }
+}
+
+async function resolveTarget(
+  target: LocatedTarget,
+  compiler: DerivationCompiler,
+  bridge: NixBridge,
+  entryFile: string,
+  projectRoot: string,
+): Promise<ResolvedOutput> {
+  return target.kind === "build"
+    ? compiler.compileTarget(target.value)
+    : bridge.instantiateNixos(target.value, compiler, { entryFile, projectRoot });
 }

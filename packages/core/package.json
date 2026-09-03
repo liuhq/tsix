@@ -1,6 +1,6 @@
 {
-  "name": "@tsix/nix",
-  "version": "0.1.0",
+  "name": "@tsix/core",
+  "version": "0.2.0",
   "files": [
     "dist"
   ],
@@ -11,11 +11,5 @@
   },
   "scripts": {
     "build": "tsc -b"
-  },
-  "dependencies": {
-    "@tsix/ir": "workspace:*"
-  },
-  "devDependencies": {
-    "@tsix/dsl": "workspace:*"
   }
 }

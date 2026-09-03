@@ -1,6 +1,6 @@
 {
-  "name": "@tsix/dsl",
-  "version": "0.1.0",
+  "name": "@tsix/store",
+  "version": "0.2.0",
   "files": [
     "dist"
   ],
@@ -13,6 +13,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@tsix/ir": "workspace:*"
+    "@tsix/core": "workspace:*"
   }
 }

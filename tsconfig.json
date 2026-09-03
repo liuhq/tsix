@@ -1,9 +1,9 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/ir" },
-    { "path": "packages/dsl" },
-    { "path": "packages/nix" },
+    { "path": "packages/core" },
+    { "path": "packages/store" },
+    { "path": "packages/bridge" },
     { "path": "packages/cli" }
   ]
 }

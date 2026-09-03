@@ -8,12 +8,18 @@ importers:
 
   .:
     devDependencies:
+      '@tsix/bridge':
+        specifier: workspace:*
+        version: link:packages/bridge
       '@tsix/cli':
         specifier: workspace:*
         version: link:packages/cli
-      '@tsix/dsl':
+      '@tsix/core':
         specifier: workspace:*
-        version: link:packages/dsl
+        version: link:packages/core
+      '@tsix/store':
+        specifier: workspace:*
+        version: link:packages/store
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -36,35 +42,37 @@ importers:
         specifier: ^4.0.0
         version: 4.1.11(@types/node@24.13.3)(@vitest/coverage-v8@4.1.11)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(tsx@4.23.12))
 
+  packages/bridge:
+    dependencies:
+      '@tsix/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tsix/store':
+        specifier: workspace:*
+        version: link:../store
+
   packages/cli:
     dependencies:
-      '@tsix/ir':
+      '@tsix/bridge':
         specifier: workspace:*
-        version: link:../ir
-      '@tsix/nix':
+        version: link:../bridge
+      '@tsix/core':
         specifier: workspace:*
-        version: link:../nix
+        version: link:../core
+      '@tsix/store':
+        specifier: workspace:*
+        version: link:../store
       tsx:
         specifier: ^4.23.0
         version: 4.23.12
 
-  packages/dsl:
-    dependencies:
-      '@tsix/ir':
-        specifier: workspace:*
-        version: link:../ir
+  packages/core: {}
 
-  packages/ir: {}
-
-  packages/nix:
+  packages/store:
     dependencies:
-      '@tsix/ir':
+      '@tsix/core':
         specifier: workspace:*
-        version: link:../ir
-    devDependencies:
-      '@tsix/dsl':
-        specifier: workspace:*
-        version: link:../dsl
+        version: link:../core
 
 packages:
 
